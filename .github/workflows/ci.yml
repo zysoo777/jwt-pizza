@@ -5,12 +5,14 @@ on:
     branches:
       - main
   workflow_dispatch:
+
 jobs:
   build:
-    name: Build
+    name: Build, Test, Coverage, and Pages
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.set_version.outputs.version }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -20,6 +22,24 @@ jobs:
         with:
           node-version: '22.x'
 
+      - name: Install dependencies
+        run: npm ci
+
+      # Run UI tests with coverage (fails automatically if < 80% due to .nycrc)
+      - name: Run Playwright tests with coverage
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:coverage
+
+      # Update Pizza Factory coverage badge
+      - name: Update coverage badge
+        run: |
+          coverage=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+          color=$(echo "$coverage < 80" | bc | awk '{if ($1) print "red"; else print "green"}')
+          curl -s -X POST "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzacoverage?label=Coverage&value=$coverage%25&color=$color" \
+            -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}"
+
+      # Create version file (kept, since your existing pipeline already does this)
       - name: set version
         id: set_version
         run: |
@@ -27,24 +47,28 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           printf '{"version": "%s" }' "$version" > public/version.json
 
-      - name: Build
+      # Build and prep GitHub Pages artifact
+      - name: Build site
         run: |
-          npm ci && npm run build
+          npm run build
           cp dist/index.html dist/404.html
 
-      - name: Update pages artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist/
+
   deploy:
+    name: Deploy to GitHub Pages
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
