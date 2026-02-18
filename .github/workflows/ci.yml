@@ -13,9 +13,30 @@ jobs:
     outputs:
       version: ${{ steps.set_version.outputs.version }}
 
+    services:
+      mysql:
+        image: mysql:8.0.29
+        env:
+          MYSQL_ROOT_PASSWORD: tempdbpassword
+          MYSQL_DATABASE: pizza
+        ports:
+          - '3306:3306'
+        options: >-
+          --health-cmd "mysqladmin ping -ptempdbpassword"
+          --health-interval 10s
+          --health-start-period 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Checkout backend repo
+        uses: actions/checkout@v4
+        with:
+          repository: zysoo777/jwt-pizza-service
+          path: jwt-pizza-service
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -24,6 +45,58 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install jq and bc
+        run: sudo apt-get update && sudo apt-get install -y jq bc
+
+      - name: Set frontend API to local backend
+        run: |
+          echo "VITE_API_URL=http://localhost:3000" >> $GITHUB_ENV
+          echo "VITE_PIZZA_SERVICE_URL=http://localhost:3000" >> $GITHUB_ENV
+          echo "VITE_SERVICE_URL=http://localhost:3000" >> $GITHUB_ENV
+
+      - name: Install backend dependencies
+        working-directory: jwt-pizza-service
+        run: npm ci
+
+      - name: Write backend config file
+        working-directory: jwt-pizza-service
+        run: |
+          echo "module.exports = {
+            jwtSecret: 'temp',
+            db: {
+              connection: {
+                host: '127.0.0.1',
+                user: 'root',
+                password: 'tempdbpassword',
+                database: 'pizza',
+                connectTimeout: 60000,
+              },
+              listPerPage: 10,
+            },
+            factory: {
+              url: 'https://pizza-factory.cs329.click',
+              apiKey: '${{ secrets.FACTORY_API_KEY }}',
+            },
+          };" > src/config.js
+
+      - name: Start backend
+        working-directory: jwt-pizza-service
+        run: |
+          nohup npm start > backend.log 2>&1 &
+          echo "Backend started"
+
+      - name: Verify backend is up
+        run: |
+          for i in {1..45}; do
+            if curl -sSf http://localhost:3000/api/docs > /dev/null; then
+              echo "Backend is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not start"
+          exit 1
 
       # Run UI tests with coverage (fails automatically if < 80% due to .nycrc)
       - name: Run Playwright tests with coverage
