@@ -39,6 +39,64 @@ test('admin can list users and delete a user', async ({ page }) => {
   const victimName = `victim user ${victimId}`;
   const victimEmail = `victim${victimId}@jwt.com`;
 
+  // mock backend for admin login + users list/delete
+  const adminUser = { id: 1, name: 'Admin', email: 'a@jwt.com', roles: [{ role: 'admin' }] };
+  const victimUser = { id: victimId, name: victimName, email: victimEmail, roles: [{ role: 'diner' }] };
+
+  let usersState = [victimUser, adminUser];
+
+  await page.route('**/api/auth', async (route, request) => {
+    // login (PUT) returns user+token
+    if (request.method() === 'PUT') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ user: adminUser, token: 'fake-token' }),
+      });
+    }
+
+    // logout (DELETE)
+    if (request.method() === 'DELETE') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    }
+
+    return route.fallback();
+  });
+
+  await page.route('**/api/user/me', async (route) => {
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(adminUser),
+    });
+  });
+
+  await page.route('**/api/user?**', async (route, request) => {
+    if (request.method() !== 'GET') return route.fallback();
+
+    const url = new URL(request.url());
+    const name = url.searchParams.get('name') ?? '*';
+
+    const filtered =
+      name === '*' ? usersState : usersState.filter((u: any) => String(u.name).toLowerCase().includes(String(name).toLowerCase()));
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ users: filtered, more: false }),
+    });
+  });
+
+  await page.route('**/api/user/*', async (route, request) => {
+    if (request.method() !== 'DELETE') return route.fallback();
+
+    const idStr = request.url().split('/api/user/')[1];
+    const id = Number(idStr);
+    usersState = usersState.filter((u: any) => u.id !== id);
+
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+  });
+
   // Create victim user
   await page.goto('/');
   await page.getByRole('link', { name: 'Register' }).click();
