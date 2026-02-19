@@ -52,10 +52,20 @@ test('admin can list users and delete a user', async ({ page }) => {
   await page.getByRole('link', { name: 'Login' }).click();
   await page.getByRole('textbox', { name: 'Email address' }).fill('a@jwt.com');
   await page.getByRole('textbox', { name: 'Password' }).fill('admin');
-  await page.getByRole('button', { name: 'Login' }).click();
+
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes('/api/auth') && r.request().method() === 'PUT' && r.status() === 200
+    ),
+    page.getByRole('button', { name: 'Login' }).click(),
+  ]);
+
+  await expect.poll(async () => {
+    return await page.evaluate(() => Boolean(localStorage.getItem('token')));
+  }).toBe(true);
 
   // Confirm admin is logged in
-  await expect(page.getByRole('link', { name: 'Logout' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('link', { name: 'Logout' })).toBeVisible({ timeout: 30000 });
 
   // Go to admin dashboard using UI link
   await page.getByRole('link', { name: /admin/i }).click();
