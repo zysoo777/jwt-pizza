@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build, Test, Coverage, and Pages
+    name: Build, Test, Coverage, and Package
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.set_version.outputs.version }}
@@ -98,13 +98,11 @@ jobs:
           echo "Backend did not start"
           exit 1
 
-      # Run UI tests with coverage (fails automatically if < 80% due to .nycrc)
       - name: Run Playwright tests with coverage
         run: |
           npx playwright install --with-deps chromium
           npm run test:coverage
 
-      # Update Pizza Factory coverage badge
       - name: Update coverage badge
         run: |
           coverage=$(jq '.total.lines.pct' coverage/coverage-summary.json)
@@ -112,7 +110,6 @@ jobs:
           curl -s -X POST "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzacoverage?label=Coverage&value=$coverage%25&color=$color" \
             -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}"
 
-      # Create version file (kept, since your existing pipeline already does this)
       - name: set version
         id: set_version
         run: |
@@ -120,29 +117,40 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           printf '{"version": "%s" }' "$version" > public/version.json
 
-      # Build and prep GitHub Pages artifact
       - name: Build site
         run: |
           npm run build
-          cp dist/index.html dist/404.html
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Update dist artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: package
           path: dist/
 
   deploy:
-    name: Deploy to GitHub Pages
+    name: Deploy to S3 + CloudFront
     needs: build
-    runs-on: ubuntu-latest
     permissions:
-      pages: write
       id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
+    runs-on: ubuntu-latest
+    env:
+      version: ${{ needs.build.outputs.version }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Create OIDC token to AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/${{ secrets.CI_IAM_ROLE }}
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist/
+
+      - name: Push to AWS S3
+        run: |
+          echo Deploying $version
+          aws s3 cp dist s3://${{ secrets.APP_BUCKET }} --recursive
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.DISTRIBUTION_ID }} --paths "/*"
