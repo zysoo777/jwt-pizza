@@ -49,11 +49,11 @@ jobs:
       - name: Install jq and bc
         run: sudo apt-get update && sudo apt-get install -y jq bc
 
-      - name: Set frontend API to local backend
+      - name: Set frontend API to deployed backend
         run: |
-          echo "VITE_API_URL=http://localhost:3000" >> $GITHUB_ENV
-          echo "VITE_PIZZA_SERVICE_URL=http://localhost:3000" >> $GITHUB_ENV
-          echo "VITE_SERVICE_URL=http://localhost:3000" >> $GITHUB_ENV
+          echo "VITE_API_URL=https://pizza-service.cs329-jwt-pizza.click" >> $GITHUB_ENV
+          echo "VITE_PIZZA_SERVICE_URL=https://pizza-service.cs329-jwt-pizza.click" >> $GITHUB_ENV
+          echo "VITE_SERVICE_URL=https://pizza-service.cs329-jwt-pizza.click" >> $GITHUB_ENV
 
       - name: Install backend dependencies
         working-directory: jwt-pizza-service
